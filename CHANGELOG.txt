@@ -1,0 +1,46 @@
+TINTUITION — CHANGELOG
+======================
+A colorant inventory tracker for paint departments.
+Data is stored locally in each device's browser. Back up from Setup regularly.
+
+
+v0.6
+----
+- Colorant Survey Mode: a separate quarterly count-and-date tool, reached from a
+  button at the bottom of the Count & Order screen. Enter a cutoff batch code for
+  the boxes-of-4 group and one for the boxes-of-6 group (YYL format, e.g. 26H =
+  Aug 2026; the letter I is skipped). For each colorant, enter total jars and how
+  many are older than its cutoff. Running totals at the bottom, a flag if aged
+  exceeds total, and export to a plain text file. Does not touch regular counts,
+  usage, or ordering.
+- Box + jar count entry: the Count column now takes boxes and loose jars
+  separately and shows the jar total live (e.g. 4 boxes + 2 jars of a box-of-4
+  colorant = 18). All data is still stored and reported in jars — boxes are just
+  an input shortcut.
+- Colorant detail view: tap any colorant on the dashboard to open a detail page —
+  a timeline strip of counts and deliveries, a list of counts with the change
+  from each prior count, a list of deliveries with status and PO, and the weeks
+  that were set aside from the average (stock rose with no delivery logged),
+  highlighted to help track down miscounts and swaps.
+- Removed the text paste box for backups, now that file download/restore is
+  confirmed working on iOS. Restore still reads older backup files.
+
+v0.5
+----
+- In-transit handling: a delivery now counts as available the day AFTER its
+  arrival date, since stock still has to be shelved. Applies to on-hand
+  position, the usage calculation, and the History label ("in transit —
+  arrives ..."). A count taken on a delivery day no longer creates a false
+  usage spike. Logged dates remain the real shipping dates.
+- Averaging window is now an editable per-store setting (Setup), defaulting to
+  6 weeks, minimum 2. Shorten it to react faster to seasonal ramps; lengthen it
+  for steadier numbers. Manual only — it never changes on its own.
+- "?" help buttons added to Setup settings (window, targets, colorants),
+  written for someone new to the app.
+- App explainer: shown expanded on first run (before any store is added),
+  walking through how to get started; collapses to a reference toggle at the
+  top of Setup once a store exists.
+- Vendor ID moved from Setup to the Count & Order page, directly below the PO
+  field. Still tap-to-copy.
+- Fix: an in-progress count is no longer lost when switching tabs, changing a
+  date, or reloading. Entries are held as a draft until saved.
