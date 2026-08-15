@@ -4,6 +4,27 @@ A colorant inventory tracker for paint departments.
 Data is stored locally in each device's browser. Back up from Setup regularly.
 
 
+v0.7
+----
+- SKU and scannable barcode on each colorant's detail view. Tap a colorant on
+  the dashboard to see its SKU (tap to copy) and a UPC-A barcode a store scanner
+  can read right off the screen to pull up inventory and delivery dates. All 16
+  codes are built in.
+- Recalibrated stock status colors, keyed to weeks of supply vs. target:
+  Red under half the target, Yellow from there to a week under target, Green
+  within a week of target either way, and Blue for more than a week over target
+  (overstock). Being a jar or two short of target now reads Green, not Yellow.
+- "Arrived" vs "Coming": if a delivery lands after your last count but you
+  haven't counted since (e.g. a skipped week), it now shows as "Arrived" with a
+  note to count and confirm — instead of misleadingly reading as still "Coming."
+  The stock math is unchanged; only the label is clearer.
+- Single-store transfer: from Setup > Backup, save just the current store —
+  counts, orders, settings, and history — to a file you can hand another rep.
+  They restore it with the normal Restore button. If they don't have the store,
+  it's added; if they do, they choose Replace (permanent hand-off) or Merge
+  (combine both sets of counts, filling empty weeks, for temporary coverage).
+  Filename includes the store number.
+
 v0.6
 ----
 - Colorant Survey Mode: a separate quarterly count-and-date tool, reached from a

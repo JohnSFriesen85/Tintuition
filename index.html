@@ -77,6 +77,7 @@
   .strip{width:7px;flex:0 0 7px}
   .s-green{background:var(--green)} .s-amber{background:#f59e0b}
   .s-red{background:var(--red)} .s-none{background:#cbd5e1}
+  .s-blue{background:#3b82f6}
   .cc-body{flex:1;padding:13px 14px}
   .cc-top{display:flex;justify-content:space-between;align-items:baseline}
   .cc-name{font-size:17px;font-weight:650;letter-spacing:.02em}
@@ -160,6 +161,8 @@
     width:34px;height:34px;padding:0;border:1px solid #cbd5e1;border-radius:8px;background:none;flex:0 0 34px
   }
   .pig{font-size:10.5px;color:#a8b2c1;margin-top:-1px;letter-spacing:.01em}
+  .arrived-note{font-size:11.5px;color:#92600a;background:#fff8ec;border:1px solid #fde3b3;border-radius:7px;padding:7px 10px;margin-top:8px;line-height:1.45}
+  .arrived-inline{color:#92600a}
   .pigsm{font-size:10.5px;color:var(--faint);margin-left:7px}
   .refrow{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
   .reflabel{font-size:13px;color:var(--muted)}
@@ -258,26 +261,54 @@ const defaultBox = name => BOX_OF_4.includes(String(name||"").trim().toUpperCase
 /* Pigment identities per the Behr colorant codes, with rough masstone colors.
    These are starting points only — adjust any swatch in Setup to match the real jar. */
 const PIGMENTS = {
-  AXL:{ n:"Permanent Yellow",  c:"#F5C518" },
-  BL: { n:"Black",             c:"#1C1C1C" },
-  CL: { n:"Yellow Oxide",      c:"#B07D2B" },
-  DL: { n:"Phthalo Green",     c:"#005B4C" },
-  EL: { n:"Phthalo Blue",      c:"#14336E" },
-  FL: { n:"Red Iron Oxide",    c:"#7B2E20" },
-  IL: { n:"Brown Iron Oxide",  c:"#5E3A1E" },
-  JL: { n:"Carbazole Purple",  c:"#3E1B57" },
-  KXL:{ n:"White",             c:"#F7F6F1" },
-  LL: { n:"Raw Umber",         c:"#52402A" },
-  RL: { n:"Permanent Red",     c:"#C21B23" },
-  RUL:{ n:"Red High-Hide",     c:"#A5121C" },
-  TL: { n:"Medium Yellow",     c:"#EF9B00" },
-  VL: { n:"Magenta",           c:"#A81B5E" },
-  VUL:{ n:"Magenta High-Hide", c:"#87104A" },
-  YL: { n:"High-Hide Yellow",  c:"#E8AC08" }
+  AXL:{ n:"Permanent Yellow",  c:"#F5C518", u:"082474999509", s:"417-710" },
+  BL: { n:"Black",             c:"#1C1C1C", u:"082474999516", s:"419-624" },
+  CL: { n:"Yellow Oxide",      c:"#B07D2B", u:"082474999523", s:"419-762" },
+  DL: { n:"Phthalo Green",     c:"#005B4C", u:"082474999530", s:"418-153" },
+  EL: { n:"Phthalo Blue",      c:"#14336E", u:"082474999547", s:"417-682" },
+  FL: { n:"Red Iron Oxide",    c:"#7B2E20", u:"082474999554", s:"417-934" },
+  IL: { n:"Brown Iron Oxide",  c:"#5E3A1E", u:"082474999561", s:"417-871" },
+  JL: { n:"Carbazole Purple",  c:"#3E1B57", u:"678885050702", s:"491-453" },
+  KXL:{ n:"White",             c:"#F7F6F1", u:"082474999585", s:"421-303" },
+  LL: { n:"Raw Umber",         c:"#52402A", u:"082474999578", s:"419-806" },
+  RL: { n:"Permanent Red",     c:"#C21B23", u:"082474999592", s:"417-806" },
+  RUL:{ n:"Red High-Hide",     c:"#A5121C", u:"082474999622", s:"418-129" },
+  TL: { n:"Medium Yellow",     c:"#EF9B00", u:"082474999608", s:"418-331" },
+  VL: { n:"Magenta",           c:"#A81B5E", u:"082474999615", s:"417-409" },
+  VUL:{ n:"Magenta High-Hide", c:"#87104A", u:"082474999639", s:"418-000" },
+  YL: { n:"High-Hide Yellow",  c:"#E8AC08", u:"678885094010", s:"1000-011-250" }
 };
 const pigmentOf = name => PIGMENTS[String(name||"").trim().toUpperCase()] || null;
 const defaultHex = name => (pigmentOf(name) || {}).c || "#94A3B8";
 const pigmentName = name => (pigmentOf(name) || {}).n || "";
+const barcodeOf = name => (pigmentOf(name) || {}).u || "";
+const skuOf = name => (pigmentOf(name) || {}).s || "";
+
+/* Render a UPC-A barcode (12 digits) as an SVG the store scanner can read off the screen. */
+const UPC_L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
+const UPC_R = ["1110010","1100110","1101100","1000010","1011100","1001110","1010000","1000100","1001000","1110100"];
+function upcaSVG(code){
+  if(!/^\d{12}$/.test(code)) return "";
+  const d = code.split("").map(Number);
+  let bits = "101";
+  for(let i=0;i<6;i++) bits += UPC_L[d[i]];
+  bits += "01010";
+  for(let i=6;i<12;i++) bits += UPC_R[d[i]];
+  bits += "101";
+  const barW = 2, H = 64, quiet = 10*barW, textH = 15;
+  const W = quiet*2 + bits.length*barW;
+  let rects = "";
+  for(let i=0;i<bits.length;i++){
+    if(bits[i] === "1"){
+      const guard = (i<3) || (i>=45 && i<50) || (i>=bits.length-3);
+      rects += `<rect x="${quiet+i*barW}" y="0" width="${barW}" height="${H+(guard?6:0)}" fill="#000"/>`;
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H+textH+6}" width="100%" style="max-width:${W}px;background:#fff;display:block;margin:0 auto">
+    <rect width="${W}" height="${H+textH+6}" fill="#fff"/>${rects}
+    <text x="${W/2}" y="${H+textH+1}" text-anchor="middle" font-family="monospace" font-size="13" letter-spacing="2">${code}</text>
+  </svg>`;
+}
 
 // A very light wash of a hex colour, for subtle row backgrounds. Mixes the hue
 // heavily toward white so even dark pigments (black, phthalo blue) stay readable.
@@ -294,7 +325,7 @@ function tintWash(hex){
 }
 
 const VENDOR_ID = "84019";     // same for every store and every rep
-const APP_VERSION = "0.6";
+const APP_VERSION = "0.7";
 const KEY = "tintuition.v1";
 const DEFAULT_TARGET_WEEKS = 6;
 const DEFAULT_LEAD_DAYS = 6;     // order placed six days before delivery
@@ -426,13 +457,23 @@ function statsFor(colorantId, st, tw){
   }
 
   const last = all.length ? all[all.length-1] : null;
-  let onHand = null, pending = 0, position = null;
+  let onHand = null, pending = 0, inTransit = 0, arrivedUncounted = 0, position = null;
   if(last){
     onHand = last.values[colorantId];
-    // still "coming" if it won't be shelved until after the last count
-    pending = st.orders
-      .filter(o => colorantId in o.values && availDate(o) > last.date)
-      .reduce((s,o)=> s + Number(o.values[colorantId]||0), 0);
+    const td = today();
+    // Anything not yet reflected in a count. Two kinds:
+    //  - in transit: hasn't arrived yet (available date still in the future)
+    //  - arrived but uncounted: landed after the last count, so it's on the shelf
+    //    now but the on-hand number predates it
+    for(const o of st.orders){
+      if(!(colorantId in o.values)) continue;
+      const av = availDate(o);
+      if(av > last.date){
+        const qty = Number(o.values[colorantId]||0);
+        if(av > td) inTransit += qty; else arrivedUncounted += qty;
+      }
+    }
+    pending = inTransit + arrivedUncounted;
     position = onHand + pending;
   }
 
@@ -440,13 +481,21 @@ function statsFor(colorantId, st, tw){
   const suggested = (targetLevel !== null && position !== null) ? Math.max(0, Math.ceil(targetLevel - position)) : null;
   const weeks = (usable && rate > 0 && position !== null) ? position / rate : null;
 
-  return { rate, usable, thin, gaps, skipped, lastInt, intervals:intervals.length, last, onHand, pending, position, targetLevel, suggested, weeks, spike };
+  return { rate, usable, thin, gaps, skipped, lastInt, intervals:intervals.length, last, onHand, pending, inTransit, arrivedUncounted, position, targetLevel, suggested, weeks, spike };
+}
+// The pending column's label depends on whether stock is still on its way,
+// or has landed since the last count and just isn't counted yet.
+function pendingLabel(s){
+  if(!s.last || s.pending === 0) return "Coming";
+  if(s.inTransit === 0 && s.arrivedUncounted > 0) return "Arrived";
+  return "Coming";
 }
 function stripClass(weeks, tw){
   if(weeks === null) return "s-none";
-  if(weeks < tw*0.5) return "s-red";
-  if(weeks < tw) return "s-amber";
-  return "s-green";
+  if(weeks < tw*0.5) return "s-red";     // under half the target — order now
+  if(weeks < tw - 1) return "s-amber";   // getting low, but not urgent
+  if(weeks <= tw + 1) return "s-green";  // within a week of target either way — good
+  return "s-blue";                       // more than a week over — overstocked
 }
 
 /* Tint ships by the box, so a bare jar count isn't orderable.
@@ -576,9 +625,10 @@ function viewDashboard(st){
         ${pigmentName(c.name) ? `<div class="pig">${esc(pigmentName(c.name))}</div>` : ""}
         <div class="stats">
           <div><div class="v mono">${s.onHand ?? "—"}</div><div class="k">On hand</div></div>
-          <div><div class="v mono">${s.last ? s.pending : "—"}</div><div class="k">Coming</div></div>
+          <div><div class="v mono">${s.last ? s.pending : "—"}</div><div class="k">${pendingLabel(s)}</div></div>
           <div><div class="v mono">${s.position !== null ? r1(s.position) : "—"}</div><div class="k">Total</div></div>
         </div>
+        ${s.arrivedUncounted > 0 ? `<div class="arrived-note">${s.arrivedUncounted} arrived since your last count — count to confirm it's on the shelf.</div>` : ""}
         <div class="meta">
           <span>Usage <b>${s.usable ? r1(s.rate)+"/wk" : "needs 2+ counts"}</b>${s.thin ? ` <span class="dim">(1 wk)</span>` : ""}</span>
           <span>Target level <b>${s.targetLevel !== null ? r1(s.targetLevel) : "—"}</b></span>
@@ -686,7 +736,8 @@ function viewEntry(st){
 function entryMeta(s, tw){
   if(!s.last) return `<span class="dim">no counts yet</span>`;
   const bits = [`on hand <b>${s.onHand}</b>`];
-  if(s.pending) bits.push(`coming <b>${s.pending}</b>`);
+  if(s.inTransit) bits.push(`coming <b>${s.inTransit}</b>`);
+  if(s.arrivedUncounted) bits.push(`<span class="arrived-inline">arrived, uncounted <b>${s.arrivedUncounted}</b></span>`);
   bits.push(s.usable ? `uses <b>${r1(s.rate)}/wk</b>${s.thin ? ` <span class="dim">(1 wk)</span>` : ""}` : `<span class="dim">needs 2+ counts</span>`);
   return bits.join(" · ");
 }
@@ -894,10 +945,11 @@ function viewDetail(st){
       </div>
       <div class="stats" style="margin-top:12px">
         <div><div class="v mono">${s.onHand ?? "—"}</div><div class="k">On hand</div></div>
-        <div><div class="v mono">${s.last ? s.pending : "—"}</div><div class="k">Coming</div></div>
+        <div><div class="v mono">${s.last ? s.pending : "—"}</div><div class="k">${pendingLabel(s)}</div></div>
         <div><div class="v mono">${s.usable ? r1(s.rate) : "—"}</div><div class="k">Jars/wk</div></div>
         <div><div class="v mono">${bx ? bx.qty : "—"}</div><div class="k">Order</div></div>
       </div>
+      ${s.arrivedUncounted > 0 ? `<div class="arrived-note" style="margin-top:8px">${s.arrivedUncounted} arrived since your last count — count to confirm it's on the shelf.</div>` : ""}
       <div class="note" style="margin-top:8px">Target ${tw} wk (${s.targetLevel!==null?r1(s.targetLevel):"—"} jars) · box of ${c.boxSize||DEFAULT_BOX}</div>
     </div>
 
@@ -915,7 +967,14 @@ function viewDetail(st){
     <div class="card pad">
       <h2>Deliveries</h2>
       <div style="margin-top:8px">${delList}</div>
-    </div>`;
+    </div>
+
+    ${(skuOf(c.name) || barcodeOf(c.name)) ? `<div class="card pad">
+      <h2>Product code</h2>
+      ${skuOf(c.name) ? `<div class="refrow"><span class="reflabel">SKU</span><button class="refval mono" onclick="copyText('${skuOf(c.name)}', this)" title="Copy">${skuOf(c.name)}</button></div>` : ""}
+      ${barcodeOf(c.name) ? `<div style="margin-top:12px">${upcaSVG(barcodeOf(c.name))}</div>
+        <div class="note" style="text-align:center;margin-top:4px">Scan from the screen to pull up store inventory.</div>` : ""}
+    </div>` : ""}`;
 }
 
 /* ---------- Colorant Survey (quarterly count & date) ----------
@@ -1314,6 +1373,11 @@ function viewSettings(st){
       <button class="btn ghost" onclick="document.getElementById('restorefile').click()">Restore file</button>
     </div>
     <input type="file" id="restorefile" accept=".json,application/json,text/plain" hidden onchange="restoreFile(this)">
+    <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      <div class="note" style="margin-bottom:8px">Or hand a single store to another rep, history and all:</div>
+      <button class="btn ghost" onclick="exportStore()">Save store #${esc(st.number)} only</button>
+      <div class="note" style="margin-top:6px">They restore it with the same Restore button. If they already have this store, they'll choose to replace it or merge in your counts.</div>
+    </div>
     <div id="backupmsg"></div>
   </div>
 
@@ -1483,8 +1547,14 @@ function restoreFile(input){
   const rd = new FileReader();
   rd.onload = () => {
     try{
-      const r = applyBackup(JSON.parse(rd.result));
-      if(r) msg("ok", `Restored ${r.stores} store(s), ${r.counts} counts, ${r.orders} orders.`);
+      const parsed = JSON.parse(rd.result);
+      if(parsed && parsed.tintuitionStore){    // single-store file
+        const r = applyStoreFile(parsed);
+        if(r) msg("ok", r);
+      } else {                                  // full backup
+        const r = applyBackup(parsed);
+        if(r) msg("ok", `Restored ${r.stores} store(s), ${r.counts} counts, ${r.orders} orders.`);
+      }
     }catch(e){
       msg("bad", "That file isn't a Tintuition backup.");
     }
@@ -1492,6 +1562,111 @@ function restoreFile(input){
   rd.onerror = () => msg("bad", "Couldn't read that file.");
   rd.readAsText(f);
   input.value = "";
+}
+
+/* ----- single-store transfer ----- */
+function exportStore(){
+  const st = store(); if(!st) return;
+  const payload = {
+    tintuitionStore: 1,
+    exported: today(),
+    store: {
+      number: st.number,
+      counts: st.counts,
+      orders: st.orders,
+      overrides: st.overrides,
+      windowWeeks: st.windowWeeks || 6
+    },
+    // carry colorant defs so a fresh app can read the counts; restore won't overwrite existing ones
+    colorants: S.colorants.map(c => ({ name:c.name, defaultTargetWeeks:c.defaultTargetWeeks, boxSize:c.boxSize, hex:c.hex }))
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `tintuition-store-${st.number}-${today()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  msg("ok", `Saved store #${st.number} (${st.counts.length} counts, ${st.orders.length} orders) to hand to another rep.`);
+}
+
+function applyStoreFile(parsed){
+  const raw = parsed.store;
+  if(!raw || !raw.number) throw new Error("shape");
+  const incoming = {
+    id: uid(),
+    number: String(raw.number).replace(/\D/g,"").slice(0,4) || "0000",
+    counts: Array.isArray(raw.counts) ? raw.counts : [],
+    orders: Array.isArray(raw.orders) ? raw.orders : [],
+    overrides: raw.overrides || {},
+    windowWeeks: Number(raw.windowWeeks) || 6
+  };
+
+  // fill in any colorants this device is missing (never overwrite existing)
+  if(Array.isArray(parsed.colorants)){
+    const have = new Set(S.colorants.map(c => c.name.toUpperCase()));
+    for(const c of parsed.colorants){
+      const nm = String(c.name||"").toUpperCase();
+      if(nm && !have.has(nm)){
+        S.colorants.push({ id:uid(), name:nm,
+          defaultTargetWeeks:Number(c.defaultTargetWeeks)||DEFAULT_TARGET_WEEKS,
+          boxSize:Number(c.boxSize)||defaultBox(nm), hex:c.hex||defaultHex(nm) });
+      }
+    }
+    S.colorants = byName(S.colorants);
+  }
+
+  const existing = S.stores.find(s => s.number === incoming.number);
+  if(!existing){
+    if(!confirm(`Add store #${incoming.number} to this device?\n\n${incoming.counts.length} counts, ${incoming.orders.length} orders.`)) return null;
+    S.stores.push(incoming);
+    S.currentId = incoming.id;
+    save(); render();
+    return `Added store #${incoming.number} — ${incoming.counts.length} counts, ${incoming.orders.length} orders.`;
+  }
+
+  // store already here: replace or merge
+  const choice = (prompt(
+    `Store #${incoming.number} is already on this device.\n\n` +
+    `Type R to REPLACE it with the incoming data (for a permanent hand-off),\n` +
+    `or M to MERGE (keep both sets of counts and orders, filling empty weeks — for temporary coverage).\n\n` +
+    `On merge, if both have an entry for the same date, the incoming one is kept.`,
+    "M"
+  ) || "").trim().toUpperCase();
+
+  if(choice === "R"){
+    existing.counts = incoming.counts;
+    existing.orders = incoming.orders;
+    existing.overrides = incoming.overrides;
+    existing.windowWeeks = incoming.windowWeeks;
+    S.currentId = existing.id;
+    save(); render();
+    return `Replaced store #${incoming.number} with the incoming data.`;
+  }
+  if(choice === "M"){
+    existing.counts = mergeByDate(existing.counts, incoming.counts);
+    existing.orders = mergeOrders(existing.orders, incoming.orders);
+    S.currentId = existing.id;
+    save(); render();
+    return `Merged into store #${incoming.number} — now ${existing.counts.length} counts, ${existing.orders.length} orders.`;
+  }
+  msg("info", "Import cancelled — nothing changed.");
+  return null;
+}
+
+// merge two count lists; when both have a count on the same date, incoming wins
+function mergeByDate(mine, incoming){
+  const byDate = {};
+  for(const c of mine) byDate[c.date] = c;
+  for(const c of incoming) byDate[c.date] = c;   // incoming overwrites same-date
+  return Object.values(byDate).sort((a,b)=> a.date < b.date ? -1 : 1);
+}
+// merge orders; dedupe on delivery date + placed date, incoming wins
+function mergeOrders(mine, incoming){
+  const key = o => `${o.placedDate}|${o.deliveryDate}`;
+  const m = {};
+  for(const o of mine) m[key(o)] = o;
+  for(const o of incoming) m[key(o)] = o;
+  return Object.values(m).sort((a,b)=> a.deliveryDate < b.deliveryDate ? -1 : 1);
 }
 
 function msg(kind, text){
