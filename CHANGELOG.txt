@@ -4,6 +4,18 @@ A colorant inventory tracker for paint departments.
 Data is stored locally in each device's browser. Back up from Setup regularly.
 
 
+v0.8
+----
+- Running order total on the Count & Order screen, shown by the PO field:
+  "Ordering X jars across Y colorants," updating live as you enter or adjust
+  amounts. Lets you cross-check the jar count against the store terminal before
+  saving.
+- Fixed: store hand-off files could import with no error but show blank colorant
+  entries on a different device. Transfer files now identify colorants by name
+  instead of an internal per-device id, so a store handed from one phone to
+  another lands with all counts and orders intact. (Full backups were never
+  affected. Older hand-off files re-imported on the same device still work.)
+
 v0.7
 ----
 - SKU and scannable barcode on each colorant's detail view. Tap a colorant on
