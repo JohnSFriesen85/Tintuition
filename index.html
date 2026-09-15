@@ -165,6 +165,9 @@
   .arrived-inline{color:#92600a}
   .order-total{font-size:14px;color:var(--muted);background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin-bottom:12px;text-align:center}
   .order-total b{color:var(--ink);font-weight:700}
+  .addnote-btn{width:auto;background:none;border:0;color:var(--muted);font-size:13px;font-weight:600;padding:2px 0;text-align:left}
+  .addnote-btn:active{color:var(--ink)}
+  .note-tag{font-size:10.5px;background:#eef2f7;color:var(--muted);border-radius:4px;padding:1px 6px;font-weight:600}
   .pigsm{font-size:10.5px;color:var(--faint);margin-left:7px}
   .refrow{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
   .reflabel{font-size:13px;color:var(--muted)}
@@ -327,15 +330,18 @@ function tintWash(hex){
 }
 
 const VENDOR_ID = "84019";     // same for every store and every rep
-const APP_VERSION = "0.8";
+const APP_VERSION = "0.9";
 const KEY = "tintuition.v1";
 const DEFAULT_TARGET_WEEKS = 6;
 const DEFAULT_LEAD_DAYS = 6;     // order placed six days before delivery
 
 /* ---------- tiny helpers ---------- */
 const uid = () => Math.random().toString(36).slice(2,10);
-const today = () => new Date().toISOString().slice(0,10);
-const addDays = (d,n) => { const x = new Date(d+"T00:00:00"); x.setDate(x.getDate()+n); return x.toISOString().slice(0,10); };
+// Build YYYY-MM-DD from LOCAL date parts. (toISOString() converts to UTC first, which
+// rolls over to tomorrow in the evening in US time zones — that would misdate counts.)
+const ymd = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+const today = () => ymd(new Date());
+const addDays = (d,n) => { const x = new Date(d+"T00:00:00"); x.setDate(x.getDate()+n); return ymd(x); };
 const daysBetween = (a,b) => (new Date(b+"T00:00:00") - new Date(a+"T00:00:00")) / 86400000;
 const fmtDate = d => new Date(d+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric",year:"2-digit"});
 const r1 = n => Math.round(n*10)/10;
@@ -429,8 +435,37 @@ function statsFor(colorantId, st, tw){
   let win = all.filter(c => c.date >= cutoff);
   if(win.length < 2) win = all.slice(-2);
 
+  // First pass over ALL history: compute each interval's weekly usage rate. We need the
+  // full history (not just the window) to establish a reliable baseline, because the window
+  // alone can be too sparse — which is exactly when one bad interval does the most damage.
+  const rateFor = (a, b) => {
+    const days = daysBetween(a.date, b.date);
+    if(days <= 0) return null;
+    const got = st.orders
+      .filter(o => colorantId in o.values && availDate(o) > a.date && availDate(o) <= b.date)
+      .reduce((s,o)=> s + Number(o.values[colorantId]||0), 0);
+    const used = a.values[colorantId] + got - b.values[colorantId];
+    return { used, days, rate:(used/days)*7 };
+  };
+  // Baseline = median of the "calm" intervals across all history (real usage, not impossible
+  // rises). This is the colorant's normal weekly rate AT THIS STORE, so it self-scales:
+  // a busy store's baseline is high, a slow store's is low.
+  const calmRates = [];
+  for(let i=1;i<all.length;i++){
+    const r = rateFor(all[i-1], all[i]);
+    if(r && r.used >= 0) calmRates.push(r.rate);
+  }
+  const baseline = median(calmRates);
+  // A single interval reading far above that baseline isn't a real week of selling — it's the
+  // "correction" half of a miscount (stock that was hidden then found shows up as a huge fake
+  // drop). Set those aside too. 3x leaves plenty of room for a genuine surge (a real busy week
+  // runs ~1.5x); only egregious artifacts (5x+) get caught.
+  const ARTIFACT_MULTIPLE = 3;
+  const ceiling = (baseline !== null && baseline > 0) ? baseline * ARTIFACT_MULTIPLE : Infinity;
+
   const intervals = [];
   let skipped = 0;                 // weeks where stock rose with no delivery on record
+  let artifacts = 0;               // weeks set aside as correction artifacts (implausibly high)
   let lastInt = null;              // the most recent gap between counts
   for(let i=1;i<win.length;i++){
     const p = win[i-1], c = win[i], days = daysBetween(p.date, c.date);
@@ -440,8 +475,10 @@ function statsFor(colorantId, st, tw){
       .reduce((s,o)=> s + Number(o.values[colorantId]||0), 0);
     const used = p.values[colorantId] + got - c.values[colorantId];
     lastInt = { used, from:p.date, to:c.date, days, ok: used >= 0 };
-    if(used < 0){ skipped++; continue; }   // tells us nothing about usage — set it aside, keep the rest
-    intervals.push({ to:c.date, rate:(used/days)*7 });
+    if(used < 0){ skipped++; continue; }   // impossible rise — set aside, keep the rest
+    const rate = (used/days)*7;
+    if(rate > ceiling){ artifacts++; continue; }   // implausibly high vs baseline — correction artifact
+    intervals.push({ to:c.date, rate });
   }
 
   // Work with whatever good weeks there are. One odd week shouldn't blank out the others —
@@ -449,7 +486,7 @@ function statsFor(colorantId, st, tw){
   const rate = median(intervals.map(i => i.rate));
   const usable = rate !== null;
   const thin = usable && intervals.length === 1;   // only one clean week to go on
-  const gaps = skipped > 0;                        // worth mentioning, not worth blocking on
+  const gaps = skipped > 0 || artifacts > 0;      // worth mentioning, not worth blocking on
 
   // Spike: a week well over the typical rate. Real trend or a miscount — either way, look.
   let spike = null;
@@ -483,7 +520,7 @@ function statsFor(colorantId, st, tw){
   const suggested = (targetLevel !== null && position !== null) ? Math.max(0, Math.ceil(targetLevel - position)) : null;
   const weeks = (usable && rate > 0 && position !== null) ? position / rate : null;
 
-  return { rate, usable, thin, gaps, skipped, lastInt, intervals:intervals.length, last, onHand, pending, inTransit, arrivedUncounted, position, targetLevel, suggested, weeks, spike };
+  return { rate, usable, thin, gaps, skipped, artifacts, baseline, lastInt, intervals:intervals.length, last, onHand, pending, inTransit, arrivedUncounted, position, targetLevel, suggested, weeks, spike };
 }
 // The pending column's label depends on whether stock is still on its way,
 // or has landed since the last count and just isn't counted yet.
@@ -573,6 +610,7 @@ function captureEntryDraft(){
   const d = { storeId:st.id, date:cd.value, cbox:{}, cjar:{}, ord:{}, touched:{} };
   const dv = document.getElementById("deliver"); if(dv) d.deliver = dv.value;
   const po = document.getElementById("ponum"); if(po) d.po = po.value;
+  const note = document.getElementById("ordernote"); if(note && note.value.trim()) d.note = note.value;
   for(const c of S.colorants){
     const bxi = document.getElementById("cbox_"+c.id);
     const jri = document.getElementById("cjar_"+c.id);
@@ -585,12 +623,20 @@ function captureEntryDraft(){
     }
   }
   const empty = Object.keys(d.cbox).length === 0 && Object.keys(d.cjar).length === 0
-             && Object.keys(d.touched).length === 0 && !d.po;
+             && Object.keys(d.touched).length === 0 && !d.po && !d.note;
   entryDraft = empty ? null : d;
   try{
     if(entryDraft) localStorage.setItem(KEY+".draft", JSON.stringify(entryDraft));
     else localStorage.removeItem(KEY+".draft");
   }catch(e){}
+}
+function openNoteField(){
+  const w = document.getElementById("note-wrap");
+  const b = document.getElementById("addnote-btn");
+  if(w) w.style.display = "";
+  if(b) b.style.display = "none";
+  const t = document.getElementById("ordernote");
+  if(t) t.focus();
 }
 function loadEntryDraft(){
   try{
@@ -645,7 +691,13 @@ function viewDashboard(st){
         ${bx && bx.qty > 0 && bx.qty - bx.raw >= 1 ? `<div class="last">Need ${r1(bx.raw)}, boxes come in ${bx.box}.</div>` : ""}
         ${s.last ? `<div class="last">Last counted ${fmtDate(s.last.date)}</div>` : ""}
         ${bx && bx.overshoot ? `<div class="flag">That box puts you at about ${Math.round(bx.coverWeeks)} weeks' supply — a while on the shelf for a slow mover. Fine if it keeps, worth skipping if space is tight.</div>` : ""}
-        ${s.gaps ? `<div class="last">${s.skipped} week${s.skipped>1?"s":""} set aside — stock rose with no delivery logged${s.usable ? ", so usage comes from the other weeks" : ""}. Check that deliveries are logged with the date they arrived.</div>` : ""}
+        ${s.gaps ? (() => {
+          const n = s.skipped + s.artifacts;
+          const why = s.artifacts > 0 && s.skipped > 0 ? "an impossible jump and an unusually large drop"
+                    : s.artifacts > 0 ? "an unusually large drop (likely found/corrected stock)"
+                    : "stock rose with no delivery logged";
+          return `<div class="last">${n} week${n>1?"s":""} set aside — ${why}${s.usable ? ", so usage comes from the other weeks" : ""}. Check that counts and deliveries look right.</div>`;
+        })() : ""}
         ${s.spike ? `<div class="flag">Spike — about ${r1(s.spike.rate)}/wk in the week ending ${fmtDate(s.spike.to)}, against ${r1(s.spike.typical)}/wk typical. Could be a real run or a miscount.</div>` : ""}
       </div>
     </div>`;
@@ -721,9 +773,20 @@ function viewEntry(st){
     <div class="card pad">
       <div class="order-total" id="order-total">${orderTotalLine()}</div>
       <label for="ponum">PO number <span class="dim">(optional)</span></label>
-      <input type="text" id="ponum" inputmode="text" autocomplete="off" placeholder="from the ordering system"
-             value="${esc((currentDraft(st) && currentDraft(st).po) || window.__po || "")}" oninput="window.__po=this.value;captureEntryDraft()">
+      <input type="text" id="ponum" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="from the ordering system"
+             value="${esc((currentDraft(st) && currentDraft(st).po) || window.__po || "")}" oninput="this.value=this.value.replace(/[^0-9]/g,'');window.__po=this.value;captureEntryDraft()">
       <div class="note" style="margin-top:6px">Saved with the order, handy if a shipment needs tracking down.</div>
+      ${(() => {
+        const noteVal = (currentDraft(st) && currentDraft(st).note) || window.__note || "";
+        const open = noteVal !== "";
+        return `<div style="margin-top:12px">
+          <button type="button" class="addnote-btn" id="addnote-btn" onclick="openNoteField()" ${open ? 'style="display:none"' : ""}>+ Add note</button>
+          <div id="note-wrap" ${open ? "" : 'style="display:none"'}>
+            <label for="ordernote">Note <span class="dim">(optional)</span></label>
+            <textarea id="ordernote" rows="2" placeholder="anything worth remembering about this order" oninput="window.__note=this.value;captureEntryDraft()">${esc(noteVal)}</textarea>
+          </div>
+        </div>`;
+      })()}
       <div class="refrow" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
         <span class="reflabel">Vendor ID</span>
         <button class="refval mono" onclick="copyText('${VENDOR_ID}', this)" title="Copy">${VENDOR_ID}</button>
@@ -750,7 +813,7 @@ function entryFoot(s, bx){
   if(bx && bx.qty > 0) out.push(`${bx.boxes} box${bx.boxes>1?"es":""}`);
   else if(bx && bx.skipped) out.push(`short ${r1(bx.raw)} — under a box, can wait`);
   if(bx && bx.overshoot) out.push(`~${Math.round(bx.coverWeeks)} wk supply`);
-  if(s.gaps) out.push(`${s.skipped} wk set aside — check delivery dates`);
+  if(s.gaps) out.push(`${s.skipped + s.artifacts} wk set aside — check counts & deliveries`);
   return out.join(" · ");
 }
 
@@ -858,13 +921,14 @@ function saveEntry(){
   if(!confirm("Save " + parts.join(" and ") + "?")) return;
 
   const po = ((document.getElementById("ponum")||{}).value || "").trim();
+  const noteVal = ((document.getElementById("ordernote")||{}).value || "").trim();
 
   if(nC) st.counts.push({ id:uid(), date:cd, values:counts });
-  if(nO) st.orders.push({ id:uid(), placedDate: cd || today(), deliveryDate:deliver, values:orders, po: po || undefined });
+  if(nO) st.orders.push({ id:uid(), placedDate: cd || today(), deliveryDate:deliver, values:orders, po: po || undefined, note: noteVal || undefined });
 
   save();
   clearEntryDraft();
-  window.__countDate = null; window.__placed = null; window.__deliver = null; window.__po = null;
+  window.__countDate = null; window.__placed = null; window.__deliver = null; window.__po = null; window.__note = null;
   S.tab = "dashboard"; render(); window.scrollTo(0,0);
 }
 
@@ -893,21 +957,35 @@ function openDetail(cid){ window.__detail = cid; render(); window.scrollTo(0,0);
 function closeDetail(){ window.__detail = null; render(); }
 
 // Per-colorant analysis for the detail view: every count with its delta, every delivery,
-// and which weeks were set aside (stock rose with no delivery on record).
+// and which weeks were set aside — either an impossible rise, or a drop so large vs the
+// colorant's baseline that it's a correction artifact rather than real usage.
 function detailData(cid, st){
   const counts = st.counts.filter(c => cid in c.values).sort((a,b)=> a.date < b.date ? -1 : 1);
+  // baseline for artifact detection (mirror of statsFor)
+  const calm = [];
+  for(let i=1;i<counts.length;i++){
+    const p = counts[i-1], c = counts[i], days = daysBetween(p.date, c.date);
+    if(days <= 0) continue;
+    const got = st.orders.filter(o => cid in o.values && availDate(o) > p.date && availDate(o) <= c.date).reduce((s,o)=> s + Number(o.values[cid]||0), 0);
+    const used = p.values[cid] + got - c.values[cid];
+    if(used >= 0) calm.push((used/days)*7);
+  }
+  const baseline = median(calm);
+  const ceiling = (baseline !== null && baseline > 0) ? baseline * 3 : Infinity;
   const rows = counts.map((c,i) => {
-    let delta = null, setAside = false;
+    let delta = null, setAside = false, why = "";
     if(i > 0){
       const p = counts[i-1];
+      const days = daysBetween(p.date, c.date);
       const got = st.orders
         .filter(o => cid in o.values && availDate(o) > p.date && availDate(o) <= c.date)
         .reduce((s,o)=> s + Number(o.values[cid]||0), 0);
       const used = p.values[cid] + got - c.values[cid];
       delta = c.values[cid] - p.values[cid];   // raw change in on-hand
-      setAside = used < 0;                       // rose beyond what deliveries explain
+      if(used < 0){ setAside = true; why = "rose"; }
+      else if(days > 0 && (used/days)*7 > ceiling){ setAside = true; why = "big drop"; }
     }
-    return { date:c.date, qty:c.values[cid], delta, setAside };
+    return { date:c.date, qty:c.values[cid], delta, setAside, why };
   });
   const dels = st.orders.filter(o => cid in o.values)
     .map(o => ({ date:o.deliveryDate, qty:o.values[cid], po:o.po, arrived: addDays(o.deliveryDate,1) <= today() }))
@@ -959,7 +1037,7 @@ function viewDetail(st){
       <span class="dl-date">${fmtDate(x.date)}</span>
       <span class="dl-qty mono">${x.qty}</span>
       <span class="dl-delta">${x.delta === null ? "" : (x.delta > 0 ? "+"+x.delta : x.delta)}</span>
-      ${x.setAside ? `<span class="dl-flag">rose — set aside</span>` : ""}
+      ${x.setAside ? `<span class="dl-flag">${x.why === "big drop" ? "big drop — set aside" : "rose — set aside"}</span>` : ""}
     </div>`).join("") : `<div class="note">No counts yet.</div>`;
 
   const delList = d.dels.length ? d.dels.map(x =>
@@ -1196,7 +1274,7 @@ function viewHistory(st){
 
   const events = [
     ...st.counts.map(c => ({t:"count", d:c.date, id:c.id, v:c.values})),
-    ...st.orders.map(o => ({t:"order", d:o.placedDate, dd:o.deliveryDate, id:o.id, v:o.values, po:o.po}))
+    ...st.orders.map(o => ({t:"order", d:o.placedDate, dd:o.deliveryDate, id:o.id, v:o.values, po:o.po, note:o.note}))
   ].sort((a,b)=> a.d < b.d ? 1 : -1);
 
   const list = events.length ? events.map(e => {
@@ -1222,7 +1300,7 @@ function viewHistory(st){
           <div class="evsub">
             ${e.t === "count"
               ? `${entries.length} colorant${entries.length>1?"s":""} · ${total} jars on hand`
-              : `${total} jars · ${arrived ? `arrived ${fmtDate(e.dd)}` : `<span class="warn">in transit — arrives ${fmtDate(e.dd)}</span>`}${e.po ? ` · PO ${esc(e.po)}` : ""}`}
+              : `${total} jars · ${arrived ? `arrived ${fmtDate(e.dd)}` : `<span class="warn">in transit — arrives ${fmtDate(e.dd)}</span>`}${e.po ? ` · PO ${esc(e.po)}` : ""}${e.note ? ` · <span class="note-tag">note</span>` : ""}`}
           </div>
         </div>
         <div class="evactions">
@@ -1280,7 +1358,11 @@ function viewEditEvent(st, type, ev){
        </div>
        <div style="margin-top:10px">
          <label for="ed_po">PO number <span class="dim">(optional)</span></label>
-         <input type="text" id="ed_po" autocomplete="off" placeholder="from the ordering system" value="${esc(ev.po||"")}">
+         <input type="text" id="ed_po" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="from the ordering system" value="${esc(ev.po||"")}" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+       </div>
+       <div style="margin-top:10px">
+         <label for="ed_note">Note <span class="dim">(optional)</span></label>
+         <textarea id="ed_note" rows="2" placeholder="anything worth remembering about this order">${esc(ev.note||"")}</textarea>
        </div>`;
 
   return `<div class="card pad">
@@ -1329,6 +1411,8 @@ function saveEdit(type, id){
     if(ev.deliveryDate < ev.placedDate){ alert("The arrival date is before the order date."); return; }
     const po = (document.getElementById("ed_po").value || "").trim();
     if(po) ev.po = po; else delete ev.po;
+    const noteV = (document.getElementById("ed_note").value || "").trim();
+    if(noteV) ev.note = noteV; else delete ev.note;
   }
   ev.values = values;
 
@@ -1618,7 +1702,7 @@ function exportStore(){
     store: {
       number: st.number,
       counts: st.counts.map(c => ({ id:c.id, date:c.date, values: byNameKeys(c.values) })),
-      orders: st.orders.map(o => ({ id:o.id, placedDate:o.placedDate, deliveryDate:o.deliveryDate, values: byNameKeys(o.values), po:o.po })),
+      orders: st.orders.map(o => ({ id:o.id, placedDate:o.placedDate, deliveryDate:o.deliveryDate, values: byNameKeys(o.values), po:o.po, note:o.note })),
       overrides: st.overrides,
       windowWeeks: st.windowWeeks || 6
     },

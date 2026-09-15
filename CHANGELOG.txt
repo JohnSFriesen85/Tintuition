@@ -4,12 +4,31 @@ A colorant inventory tracker for paint departments.
 Data is stored locally in each device's browser. Back up from Setup regularly.
 
 
+v0.9
+----
+- Usage math: correction "artifacts" no longer inflate the recommended order.
+  When hidden stock is found weeks later, it shows up as a huge fake drop that
+  the app was reading as real usage — driving order suggestions 2-3x too high.
+  Now any single week reading more than 3x a colorant's normal rate (measured
+  from its own calm weeks at that store) is set aside, the same as an impossible
+  rise. This self-scales: a busy store's genuine big week still counts, while a
+  slow store's phantom drop gets caught. Real demand surges (up to 3x) still
+  count, so the app won't under-order into a run. Set-aside weeks are shown in
+  the colorant detail view, labeled "rose" or "big drop."
+- Date fix: counts and orders entered in the evening are no longer stamped a day
+  ahead. The app was using UTC to build the date, which rolls to tomorrow after
+  late afternoon in US time zones; it now uses the device's local date.
+- Running order total on the Count & Order screen, by the PO field: "Ordering X
+  jars across Y colorants," updating live — to cross-check against the store
+  terminal before saving.
+- Per-order notes: a collapsed "+ Add note" under the PO field. Saved with the
+  order, shown with a small "note" tag in History, and editable when you open
+  the order. Hidden until you add one, so the screen stays clean.
+- PO field now accepts digits only, and brings up the number pad on mobile.
+
 v0.8
 ----
-- Running order total on the Count & Order screen, shown by the PO field:
-  "Ordering X jars across Y colorants," updating live as you enter or adjust
-  amounts. Lets you cross-check the jar count against the store terminal before
-  saving.
+- Running order total on the Count & Order screen (see v0.9 — shipped together).
 - Fixed: store hand-off files could import with no error but show blank colorant
   entries on a different device. Transfer files now identify colorants by name
   instead of an internal per-device id, so a store handed from one phone to
@@ -20,8 +39,7 @@ v0.7
 ----
 - SKU and scannable barcode on each colorant's detail view. Tap a colorant on
   the dashboard to see its SKU (tap to copy) and a UPC-A barcode a store scanner
-  can read right off the screen to pull up inventory and delivery dates. All 16
-  codes are built in.
+  can read right off the screen to pull up inventory and delivery dates.
 - Recalibrated stock status colors, keyed to weeks of supply vs. target:
   Red under half the target, Yellow from there to a week under target, Green
   within a week of target either way, and Blue for more than a week over target
@@ -29,51 +47,31 @@ v0.7
 - "Arrived" vs "Coming": if a delivery lands after your last count but you
   haven't counted since (e.g. a skipped week), it now shows as "Arrived" with a
   note to count and confirm — instead of misleadingly reading as still "Coming."
-  The stock math is unchanged; only the label is clearer.
-- Single-store transfer: from Setup > Backup, save just the current store —
-  counts, orders, settings, and history — to a file you can hand another rep.
-  They restore it with the normal Restore button. If they don't have the store,
-  it's added; if they do, they choose Replace (permanent hand-off) or Merge
-  (combine both sets of counts, filling empty weeks, for temporary coverage).
-  Filename includes the store number.
+- Single-store transfer: from Setup > Backup, save just the current store to a
+  file you can hand another rep. They restore it with the normal Restore button;
+  if they already have the store, they choose Replace or Merge.
 
 v0.6
 ----
-- Colorant Survey Mode: a separate quarterly count-and-date tool, reached from a
-  button at the bottom of the Count & Order screen. Enter a cutoff batch code for
-  the boxes-of-4 group and one for the boxes-of-6 group (YYL format, e.g. 26H =
-  Aug 2026; the letter I is skipped). For each colorant, enter total jars and how
-  many are older than its cutoff. Running totals at the bottom, a flag if aged
-  exceeds total, and export to a plain text file. Does not touch regular counts,
-  usage, or ordering.
-- Box + jar count entry: the Count column now takes boxes and loose jars
-  separately and shows the jar total live (e.g. 4 boxes + 2 jars of a box-of-4
-  colorant = 18). All data is still stored and reported in jars — boxes are just
-  an input shortcut.
-- Colorant detail view: tap any colorant on the dashboard to open a detail page —
-  a timeline strip of counts and deliveries, a list of counts with the change
-  from each prior count, a list of deliveries with status and PO, and the weeks
-  that were set aside from the average (stock rose with no delivery logged),
-  highlighted to help track down miscounts and swaps.
-- Removed the text paste box for backups, now that file download/restore is
-  confirmed working on iOS. Restore still reads older backup files.
+- Colorant Survey Mode: a separate quarterly count-and-date tool. Enter a cutoff
+  batch code for the boxes-of-4 and boxes-of-6 groups (YYL format, e.g. 26H),
+  enter total and aged jars per colorant, and export a text file. Doesn't touch
+  regular counts or ordering.
+- Box + jar count entry: enter boxes and loose jars separately; the app shows
+  the jar total live. Everything is still stored in jars.
+- Colorant detail view: tap a colorant on the dashboard for a timeline of counts
+  and deliveries, counts with deltas, deliveries with status and PO, and the
+  weeks set aside from the average.
+- Removed the text paste box for backups (file restore confirmed on iOS).
 
 v0.5
 ----
-- In-transit handling: a delivery now counts as available the day AFTER its
-  arrival date, since stock still has to be shelved. Applies to on-hand
-  position, the usage calculation, and the History label ("in transit —
-  arrives ..."). A count taken on a delivery day no longer creates a false
-  usage spike. Logged dates remain the real shipping dates.
-- Averaging window is now an editable per-store setting (Setup), defaulting to
-  6 weeks, minimum 2. Shorten it to react faster to seasonal ramps; lengthen it
-  for steadier numbers. Manual only — it never changes on its own.
-- "?" help buttons added to Setup settings (window, targets, colorants),
-  written for someone new to the app.
-- App explainer: shown expanded on first run (before any store is added),
-  walking through how to get started; collapses to a reference toggle at the
-  top of Setup once a store exists.
-- Vendor ID moved from Setup to the Count & Order page, directly below the PO
-  field. Still tap-to-copy.
-- Fix: an in-progress count is no longer lost when switching tabs, changing a
-  date, or reloading. Entries are held as a draft until saved.
+- In-transit handling: a delivery counts as available the day AFTER arrival,
+  since stock still has to be shelved. A count on a delivery day no longer
+  creates a false usage spike. Logged dates stay the real shipping dates.
+- Averaging window is an editable per-store setting (Setup), default 6 weeks.
+- "?" help buttons on Setup settings, written for a new rep.
+- App explainer: expanded on first run, collapsible reference afterward.
+- Vendor ID moved to the Count & Order page, below the PO field.
+- Fix: an in-progress count is no longer lost on tab switch, date change, or
+  reload — held as a draft until saved.
