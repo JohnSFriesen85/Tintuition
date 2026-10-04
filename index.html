@@ -168,6 +168,9 @@
   .addnote-btn{width:auto;background:none;border:0;color:var(--muted);font-size:13px;font-weight:600;padding:2px 0;text-align:left}
   .addnote-btn:active{color:var(--ink)}
   .note-tag{font-size:10.5px;background:#eef2f7;color:var(--muted);border-radius:4px;padding:1px 6px;font-weight:600}
+  .supply-head{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:10px 14px 4px;background:#f8fafc;border-top:1px solid var(--line)}
+  .supply-row{background:#fcfcfd}
+  .supply-card .cc-name{color:var(--ink)}
   .pigsm{font-size:10.5px;color:var(--faint);margin-left:7px}
   .refrow{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
   .reflabel{font-size:13px;color:var(--muted)}
@@ -263,6 +266,29 @@ const BOX_OF_4 = ["BL","CL","KXL","LL"];   // these ship 4 jars to a box; everyt
 const DEFAULT_BOX = 6;
 const defaultBox = name => BOX_OF_4.includes(String(name||"").trim().toUpperCase()) ? 4 : DEFAULT_BOX;
 
+/* Supplies — sticks, keys, pour spouts. Not tint: counted in whole units (1 box = 1 item),
+   no usage rate, no target, no recommendation. Just an accurate count.
+   kind "order": counted AND ordered here, and included in the quarterly survey (count only).
+   kind "count": counted only — not ordered here (handled by a different system) and not in
+   the survey (pour spouts). Matching is by name, so existing STICK/KEY items migrate in. */
+const SUPPLY_DEFS = [
+  { name:"1G STICK", label:"1G Stick",     kind:"order", match:["1G STICK","1GSTICK","STICK 1G","1G"] },
+  { name:"5G STICK", label:"5G Stick",     kind:"order", match:["5G STICK","5GSTICK","STICK 5G","5G"] },
+  { name:"KEY",      label:"Keys",         kind:"order", match:["KEY","KEYS"] },
+  { name:"SPOUT",    label:"Pour Spouts",  kind:"count", match:["SPOUT","SPOUTS","POUR SPOUT","POUR SPOUTS","POURSPOUT"] }
+];
+const supplyDefFor = name => {
+  const n = String(name||"").trim().toUpperCase();
+  return SUPPLY_DEFS.find(d => d.name === n || d.match.includes(n)) || null;
+};
+const isSupply = c => !!(c && (c.supply || supplyDefFor(c.name)));
+const supplyKind = c => c && (c.supply || (supplyDefFor(c.name)||{}).kind || null);
+const supplyLabel = c => { const d = supplyDefFor(c.name); return d ? d.label : (c.name||""); };
+// ordered here? colorants yes; supplies only if kind "order"
+const isOrderable = c => !isSupply(c) || supplyKind(c) === "order";
+// in the quarterly survey? colorants yes; supplies only if kind "order" (sticks/keys)
+const inSurvey = c => !isSupply(c) || supplyKind(c) === "order";
+
 /* Pigment identities per the Behr colorant codes, with rough masstone colors.
    These are starting points only — adjust any swatch in Setup to match the real jar. */
 const PIGMENTS = {
@@ -330,7 +356,7 @@ function tintWash(hex){
 }
 
 const VENDOR_ID = "84019";     // same for every store and every rep
-const APP_VERSION = "0.9";
+const APP_VERSION = "0.95";
 const KEY = "tintuition.v1";
 const DEFAULT_TARGET_WEEKS = 6;
 const DEFAULT_LEAD_DAYS = 6;     // order placed six days before delivery
@@ -385,7 +411,21 @@ function load(){
     p.colorants.forEach(c => {
       if(!c.boxSize) c.boxSize = defaultBox(c.name);
       if(!c.hex) c.hex = defaultHex(c.name);
+      // migrate any existing stick/key/spout colorant into a supply item (keeps its history).
+      const d = supplyDefFor(c.name);
+      if(d && !c.supply){
+        c.supply = d.kind;
+        c.name = d.name;       // normalize the name so future matches are exact
+        c.boxSize = 1;         // supplies count 1 unit = 1 item
+      }
     });
+    // make sure every supply exists (add any the data doesn't have yet)
+    for(const d of SUPPLY_DEFS){
+      if(!p.colorants.some(c => c.name.toUpperCase() === d.name)){
+        p.colorants.push({ id:uid(), name:d.name, supply:d.kind, boxSize:1,
+          defaultTargetWeeks:DEFAULT_TARGET_WEEKS, hex:"#94A3B8" });
+      }
+    }
     if(!p.colorants.length) p.colorants = freshState().colorants;
     return p;
   }catch(e){ return freshState(); }
@@ -661,6 +701,7 @@ function viewDashboard(st){
     Usage is the median of the last six weeks of counts, so one bad count won't swing it.
   </div>`;
   for(const c of cs){
+    if(isSupply(c)) continue;   // supplies shown as simple count cards at the end
     const tw = targetWeeks(c, st), s = statsFor(c.id, st, tw);
     const bx = boxOrder(s.suggested, c.boxSize, s.rate, s.position, tw);
     out += `<div class="card colorcard" onclick="openDetail('${c.id}')" style="cursor:pointer">
@@ -673,7 +714,7 @@ function viewDashboard(st){
         ${pigmentName(c.name) ? `<div class="pig">${esc(pigmentName(c.name))}</div>` : ""}
         <div class="stats">
           <div><div class="v mono">${s.onHand ?? "—"}</div><div class="k">On hand</div></div>
-          <div><div class="v mono">${s.last ? s.pending : "—"}</div><div class="k">${pendingLabel(s)}</div></div>
+          <div><div class="v mono">${s.last ? s.inTransit : "—"}</div><div class="k">Coming</div></div>
           <div><div class="v mono">${s.position !== null ? r1(s.position) : "—"}</div><div class="k">Total</div></div>
         </div>
         ${s.arrivedUncounted > 0 ? `<div class="arrived-note">${s.arrivedUncounted} arrived since your last count — count to confirm it's on the shelf.</div>` : ""}
@@ -702,6 +743,26 @@ function viewDashboard(st){
       </div>
     </div>`;
   }
+
+  // supplies: simple count cards, no usage/target/strip
+  const supplies = cs.filter(isSupply);
+  if(supplies.length){
+    out += `<div class="supply-head" style="margin:14px 2px 6px">Sticks, keys &amp; spouts</div>`;
+    for(const c of supplies){
+      const last = [...st.counts].reverse().find(k => c.id in k.values);
+      const onHand = last ? last.values[c.id] : null;
+      out += `<div class="card colorcard supply-card">
+        <div class="strip s-none"></div>
+        <div class="cc-body">
+          <div class="cc-top">
+            <span class="cc-name mono">${esc(supplyLabel(c))}</span>
+            <span class="cc-target">${supplyKind(c)==="order" ? "counted & ordered" : "count only"}</span>
+          </div>
+          <div class="meta"><span>On hand <b>${onHand !== null ? onHand : "—"}</b></span>${last ? `<span class="dim">counted ${fmtDate(last.date)}</span>` : ""}</div>
+        </div>
+      </div>`;
+    }
+  }
   return out;
 }
 
@@ -717,6 +778,7 @@ function viewEntry(st){
 
   let rows = "";
   for(const c of S.colorants){
+    if(isSupply(c)) continue;   // supplies render separately, at the end
     const tw = targetWeeks(c, st), s = statsFor(c.id, st, tw);
     const b = c.boxSize || DEFAULT_BOX;
     const bx = boxOrder(s.suggested, b, s.rate, s.position, tw);
@@ -756,6 +818,45 @@ function viewEntry(st){
       </div>
       <div class="rowfoot" id="foot_${c.id}">${entryFoot(s, bx)}</div>
     </div>`;
+  }
+
+  // ----- supplies: sticks, keys, pour spouts — stripped down, at the end -----
+  let supplyRows = "";
+  const supplies = S.colorants.filter(isSupply);
+  for(const c of supplies){
+    const last = [...st.counts].reverse().find(k => c.id in k.values);
+    const onHand = last ? last.values[c.id] : null;
+    const orderable = supplyKind(c) === "order";
+    const cntVal = dr && dr.cbox && (c.id in dr.cbox) ? dr.cbox[c.id] : "";
+    const touched = dr && dr.touched && dr.touched[c.id];
+    const ordVal = dr ? (c.id in dr.ord ? dr.ord[c.id] : "") : "";
+    supplyRows += `<div class="erow supply-row" id="row_${c.id}">
+      <div class="rowhead">
+        <span class="nm mono">${esc(supplyLabel(c))}</span>
+        <span class="rowmeta dim">${onHand !== null ? "on hand "+onHand : "not counted yet"}${orderable ? "" : " · not ordered here"}</span>
+      </div>
+      <div class="fields">
+        <div class="fld countfld">
+          <label>Count <span class="dim">(units)</span></label>
+          <div class="bjrow">
+            <input type="number" inputmode="numeric" id="cbox_${c.id}" placeholder="0" value="${cntVal}"
+                   data-cid="${c.id}" data-box="1" oninput="countChanged('${c.id}')" aria-label="Count of ${esc(supplyLabel(c))}">
+          </div>
+        </div>
+        ${orderable ? `<div class="fld">
+          <label for="ord_${c.id}">Order</label>
+          <div class="stepper">
+            <button type="button" class="step" onclick="bump('${c.id}',1,-1)" aria-label="One fewer ${esc(supplyLabel(c))}">−</button>
+            <input type="number" inputmode="numeric" id="ord_${c.id}" placeholder="0" value="${ordVal}"
+                   step="1" min="0" data-box="1"${touched ? ' data-touched="1"' : ''} onblur="snapBox('${c.id}')" oninput="orderTouched('${c.id}')">
+            <button type="button" class="step" onclick="bump('${c.id}',1,1)" aria-label="One more ${esc(supplyLabel(c))}">+</button>
+          </div>
+        </div>` : `<div class="fld"><div class="note" style="margin-top:18px">Count only</div></div>`}
+      </div>
+    </div>`;
+  }
+  if(supplyRows){
+    rows += `<div class="supply-head">Sticks, keys &amp; spouts</div>` + supplyRows;
   }
 
   return `<div class="card pad">
@@ -821,6 +922,8 @@ function entryFoot(s, bx){
 function countChanged(cid){
   const st = store(); if(!st) return;
   const c = S.colorants.find(x => x.id === cid); if(!c) return;
+  // Supplies have no usage math and no auto-recommendation — just capture the count.
+  if(isSupply(c)){ captureEntryDraft(); refreshOrderTotal(); return; }
   const b = c.boxSize || DEFAULT_BOX;
   const boxEl = document.getElementById("cbox_"+cid);
   const jarEl = document.getElementById("cjar_"+cid);
@@ -844,10 +947,14 @@ function countChanged(cid){
   if(meta) meta.innerHTML = entryMeta(s, tw);
   if(foot) foot.innerHTML = entryFoot(s, bx);
 
-  // update the suggested order unless the user has typed their own amount
+  // Entering a count is new information, so refresh this colorant's recommendation —
+  // even if the order field was touched. A deliberate override set AFTER counting still
+  // sticks (you're not changing the count then); but an accidental bump before counting,
+  // or a stale value, gets corrected the moment you count. Counting is the reset.
   const ord = document.getElementById("ord_"+cid);
-  if(ord && !ord.dataset.touched){
+  if(ord){
     ord.value = bx && bx.qty > 0 ? bx.qty : "";
+    delete ord.dataset.touched;
   }
   captureEntryDraft();
   refreshOrderTotal();
@@ -858,12 +965,15 @@ function orderTouched(cid){
   captureEntryDraft();
   refreshOrderTotal();
 }
+// Reset every order field back to the app's recommendation (the escape hatch if an order
+// got bumped by accident). Clears touched, then recomputes — respecting any counts
+// currently entered on screen — so you land on live recommendations, not blanks.
 function clearOrders(){
   for(const c of S.colorants){
     const el = document.getElementById("ord_"+c.id);
-    if(el){ el.value = ""; el.dataset.touched = "1"; }
+    if(el) delete el.dataset.touched;
+    countChanged(c.id);   // reads live count inputs, refills the recommendation
   }
-  captureEntryDraft();
   refreshOrderTotal();
 }
 
@@ -872,22 +982,24 @@ function clearOrders(){
 // inputs exist) falls back to the draft, then the current suggestions.
 function orderTotalLine(){
   const st = store(); if(!st) return "";
-  let jars = 0, lines = 0;
+  let items = 0, lines = 0;    // each jar and each supply unit = one item, to match the terminal
   const dr = currentDraft(st);
   for(const c of S.colorants){
+    if(!isOrderable(c)) continue;   // pour spouts aren't on this PO
     const el = document.getElementById("ord_"+c.id);
     let v;
     if(el) v = Number(el.value) || 0;
     else if(dr && (c.id in dr.ord)) v = Number(dr.ord[c.id]) || 0;
+    else if(isSupply(c)) v = 0;     // supplies have no auto-suggestion
     else {
       const tw = targetWeeks(c, st), s = statsFor(c.id, st, tw);
       const bx = boxOrder(s.suggested, c.boxSize, s.rate, s.position, tw);
       v = dr ? 0 : (bx && bx.qty > 0 ? bx.qty : 0);
     }
-    if(v > 0){ jars += v; lines++; }
+    if(v > 0){ items += v; lines++; }
   }
-  if(jars === 0) return `<span class="dim">No order entered yet.</span>`;
-  return `Ordering <b>${jars}</b> jar${jars>1?"s":""} across <b>${lines}</b> colorant${lines>1?"s":""}`;
+  if(items === 0) return `<span class="dim">No order entered yet.</span>`;
+  return `Ordering <b>${items}</b> item${items>1?"s":""} across <b>${lines}</b> line${lines>1?"s":""}`;
 }
 function refreshOrderTotal(){
   const el = document.getElementById("order-total");
@@ -907,7 +1019,8 @@ function saveEntry(){
     const total = countTotal(bxi ? bxi.value : "", jri ? jri.value : "", box);
     if(total !== null) counts[c.id] = total;
 
-    const ov = Number(document.getElementById("ord_"+c.id).value);
+    const ordEl = document.getElementById("ord_"+c.id);   // pour spouts have no order field
+    const ov = ordEl ? Number(ordEl.value) : 0;
     if(ov && ov > 0) orders[c.id] = Math.max(1, Math.round(ov / box)) * box;
   }
 
@@ -1058,7 +1171,7 @@ function viewDetail(st){
       </div>
       <div class="stats" style="margin-top:12px">
         <div><div class="v mono">${s.onHand ?? "—"}</div><div class="k">On hand</div></div>
-        <div><div class="v mono">${s.last ? s.pending : "—"}</div><div class="k">${pendingLabel(s)}</div></div>
+        <div><div class="v mono">${s.last ? s.inTransit : "—"}</div><div class="k">Coming</div></div>
         <div><div class="v mono">${s.usable ? r1(s.rate) : "—"}</div><div class="k">Jars/wk</div></div>
         <div><div class="v mono">${bx ? bx.qty : "—"}</div><div class="k">Order</div></div>
       </div>
@@ -1146,7 +1259,23 @@ function surveyRefresh(){
 
 function viewSurvey(st){
   const sv = window.__survey;
-  const rows = S.colorants.map(c => {
+  const rows = S.colorants.filter(inSurvey).map(c => {
+    const supply = isSupply(c);   // sticks/keys: count only, no aging (they don't expire)
+    if(supply){
+      return `<div class="erow supply-row">
+        <div class="rowhead">
+          <span class="nm mono">${esc(supplyLabel(c))}</span>
+          <span class="rowmeta dim">count only — no date</span>
+        </div>
+        <div class="fields">
+          <div class="fld">
+            <label for="stot_${c.id}">Total units</label>
+            <input type="number" inputmode="numeric" id="stot_${c.id}" value="${esc(sv.tot[c.id]||"")}" oninput="surveySet('tot','${c.id}',this.value)">
+          </div>
+          <div class="fld"><div class="note" style="margin-top:18px">No aging</div></div>
+        </div>
+      </div>`;
+    }
     const code = isFourBox(c) ? sv.cut4 : sv.cut6;
     const l = batchLabel(code);
     const cutTxt = l ? `older than ${parseBatch(code).code} (${l})` : "older than —";
@@ -1213,11 +1342,14 @@ function exportSurvey(){
   L.push("--------------------------------------");
   let tT=0, tA=0;
   for(const c of S.colorants){
-    const t = Number(sv.tot[c.id]||0), a = Number(sv.aged[c.id]||0);
+    if(!inSurvey(c)) continue;   // pour spouts aren't surveyed
+    const supply = isSupply(c);
+    const t = Number(sv.tot[c.id]||0), a = supply ? 0 : Number(sv.aged[c.id]||0);
     tT += t; tA += a;
-    const code = isFourBox(c) ? (c4?c4.code:"—") : (c6?c6.code:"—");
+    const code = supply ? "—" : (isFourBox(c) ? (c4?c4.code:"—") : (c6?c6.code:"—"));
+    const label = supply ? supplyLabel(c) : c.name;
     L.push(
-      c.name.padEnd(10) + " " +
+      label.padEnd(12) + " " +
       String(t).padStart(5) + "  " +
       String(a).padStart(5) + "   " + code
     );
