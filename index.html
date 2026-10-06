@@ -284,8 +284,13 @@ const supplyDefFor = name => {
 const isSupply = c => !!(c && (c.supply || supplyDefFor(c.name)));
 const supplyKind = c => c && (c.supply || (supplyDefFor(c.name)||{}).kind || null);
 const supplyLabel = c => { const d = supplyDefFor(c.name); return d ? d.label : (c.name||""); };
-// ordered here? colorants yes; supplies only if kind "order"
-const isOrderable = c => !isSupply(c) || supplyKind(c) === "order";
+// has an order field + shows incoming? everything except... nothing. All items can show
+// an order and incoming. (Spouts track their own orders so you can see what's on the way —
+// they're just ordered through a different system.)
+const isOrderable = c => true;
+// counts toward the PO order total (the terminal cross-check)? colorants and sticks/keys yes;
+// pour spouts NO — they're ordered separately, so they'd break the terminal match.
+const inOrderTotal = c => !isSupply(c) || supplyKind(c) === "order";
 // in the quarterly survey? colorants yes; supplies only if kind "order" (sticks/keys)
 const inSurvey = c => !isSupply(c) || supplyKind(c) === "order";
 
@@ -356,7 +361,7 @@ function tintWash(hex){
 }
 
 const VENDOR_ID = "84019";     // same for every store and every rep
-const APP_VERSION = "0.95";
+const APP_VERSION = "0.96";
 const KEY = "tintuition.v1";
 const DEFAULT_TARGET_WEEKS = 6;
 const DEFAULT_LEAD_DAYS = 6;     // order placed six days before delivery
@@ -751,14 +756,18 @@ function viewDashboard(st){
     for(const c of supplies){
       const last = [...st.counts].reverse().find(k => c.id in k.values);
       const onHand = last ? last.values[c.id] : null;
+      const incoming = st.orders
+        .filter(o => c.id in o.values && availDate(o) > (last ? last.date : "0000-00-00"))
+        .reduce((s,o)=> s + Number(o.values[c.id]||0), 0);
+      const tag = supplyKind(c)==="order" ? "counted & ordered" : "ordered separately";
       out += `<div class="card colorcard supply-card">
         <div class="strip s-none"></div>
         <div class="cc-body">
           <div class="cc-top">
             <span class="cc-name mono">${esc(supplyLabel(c))}</span>
-            <span class="cc-target">${supplyKind(c)==="order" ? "counted & ordered" : "count only"}</span>
+            <span class="cc-target">${tag}</span>
           </div>
-          <div class="meta"><span>On hand <b>${onHand !== null ? onHand : "—"}</b></span>${last ? `<span class="dim">counted ${fmtDate(last.date)}</span>` : ""}</div>
+          <div class="meta"><span>On hand <b>${onHand !== null ? onHand : "—"}</b></span>${incoming > 0 ? `<span>Coming <b>${incoming}</b></span>` : ""}${last ? `<span class="dim">counted ${fmtDate(last.date)}</span>` : ""}</div>
         </div>
       </div>`;
     }
@@ -826,14 +835,22 @@ function viewEntry(st){
   for(const c of supplies){
     const last = [...st.counts].reverse().find(k => c.id in k.values);
     const onHand = last ? last.values[c.id] : null;
-    const orderable = supplyKind(c) === "order";
+    // incoming: supply orders not yet available (same availability rule as tint)
+    const incoming = st.orders
+      .filter(o => c.id in o.values && availDate(o) > (last ? last.date : "0000-00-00"))
+      .reduce((s,o)=> s + Number(o.values[c.id]||0), 0);
+    const offPO = supplyKind(c) !== "order";   // spouts: ordered elsewhere, not on this PO
     const cntVal = dr && dr.cbox && (c.id in dr.cbox) ? dr.cbox[c.id] : "";
     const touched = dr && dr.touched && dr.touched[c.id];
     const ordVal = dr ? (c.id in dr.ord ? dr.ord[c.id] : "") : "";
+    const metaBits = [];
+    if(onHand !== null) metaBits.push("on hand "+onHand); else metaBits.push("not counted yet");
+    if(incoming > 0) metaBits.push("coming "+incoming);
+    if(offPO) metaBits.push("ordered separately");
     supplyRows += `<div class="erow supply-row" id="row_${c.id}">
       <div class="rowhead">
         <span class="nm mono">${esc(supplyLabel(c))}</span>
-        <span class="rowmeta dim">${onHand !== null ? "on hand "+onHand : "not counted yet"}${orderable ? "" : " · not ordered here"}</span>
+        <span class="rowmeta dim">${metaBits.join(" · ")}</span>
       </div>
       <div class="fields">
         <div class="fld countfld">
@@ -843,15 +860,15 @@ function viewEntry(st){
                    data-cid="${c.id}" data-box="1" oninput="countChanged('${c.id}')" aria-label="Count of ${esc(supplyLabel(c))}">
           </div>
         </div>
-        ${orderable ? `<div class="fld">
-          <label for="ord_${c.id}">Order</label>
+        <div class="fld">
+          <label for="ord_${c.id}">Order${offPO ? ` <span class="dim">(tracking)</span>` : ""}</label>
           <div class="stepper">
             <button type="button" class="step" onclick="bump('${c.id}',1,-1)" aria-label="One fewer ${esc(supplyLabel(c))}">−</button>
             <input type="number" inputmode="numeric" id="ord_${c.id}" placeholder="0" value="${ordVal}"
                    step="1" min="0" data-box="1"${touched ? ' data-touched="1"' : ''} onblur="snapBox('${c.id}')" oninput="orderTouched('${c.id}')">
             <button type="button" class="step" onclick="bump('${c.id}',1,1)" aria-label="One more ${esc(supplyLabel(c))}">+</button>
           </div>
-        </div>` : `<div class="fld"><div class="note" style="margin-top:18px">Count only</div></div>`}
+        </div>
       </div>
     </div>`;
   }
@@ -985,7 +1002,7 @@ function orderTotalLine(){
   let items = 0, lines = 0;    // each jar and each supply unit = one item, to match the terminal
   const dr = currentDraft(st);
   for(const c of S.colorants){
-    if(!isOrderable(c)) continue;   // pour spouts aren't on this PO
+    if(!inOrderTotal(c)) continue;   // pour spouts aren't on this PO
     const el = document.getElementById("ord_"+c.id);
     let v;
     if(el) v = Number(el.value) || 0;
@@ -1259,10 +1276,15 @@ function surveyRefresh(){
 
 function viewSurvey(st){
   const sv = window.__survey;
-  const rows = S.colorants.filter(inSurvey).map(c => {
+  const surveyItems = S.colorants.filter(inSurvey)
+    .sort((a,b) => (isSupply(a)?1:0) - (isSupply(b)?1:0));   // tint first, sticks/keys last
+  let supplyHeaderShown = false;
+  const rows = surveyItems.map(c => {
     const supply = isSupply(c);   // sticks/keys: count only, no aging (they don't expire)
     if(supply){
-      return `<div class="erow supply-row">
+      const header = supplyHeaderShown ? "" : `<div class="supply-head">Sticks &amp; keys</div>`;
+      supplyHeaderShown = true;
+      return header + `<div class="erow supply-row">
         <div class="rowhead">
           <span class="nm mono">${esc(supplyLabel(c))}</span>
           <span class="rowmeta dim">count only — no date</span>
@@ -1317,8 +1339,34 @@ function viewSurvey(st){
       <div id="survey-totals" class="note" style="font-size:14px">—</div>
       <button class="btn" style="margin-top:12px" onclick="exportSurvey()">Export as text file</button>
       <div style="height:8px"></div>
+      <button class="btn ghost" onclick="autofillFromSurvey()">Autofill on hand</button>
+      <div class="note" style="margin-top:6px">Saves these totals as today's count on the Count &amp; Order screen, so you don't recount.</div>
+      <div style="height:8px"></div>
       <button class="btn ghost" onclick="clearSurvey()">Clear survey</button>
     </div>`;
+}
+
+// Save the survey's counted totals as a regular count dated today, so a thorough quarterly
+// count also updates on-hand (and the order recommendations) without recounting. Uses the
+// combined total — aged jars included, since they stay in usable inventory.
+function autofillFromSurvey(){
+  const sv = window.__survey; if(!sv) return;
+  const st = store(); if(!st) return;
+  const values = {};
+  for(const c of S.colorants){
+    if(!(c.id in sv.tot)) continue;
+    const v = Number(sv.tot[c.id]);
+    if(!isNaN(v) && sv.tot[c.id] !== "") values[c.id] = v;
+  }
+  const n = Object.keys(values).length;
+  if(!n){ alert("Enter some survey counts first."); return; }
+  if(!confirm(`Save these ${n} survey counts as today's on-hand (${today()})? This updates the Count & Order screen.`)) return;
+  const cd = today();
+  // replace any existing count for today rather than stacking a second one
+  st.counts = st.counts.filter(k => k.date !== cd);
+  st.counts.push({ id:uid(), date:cd, values });
+  save();
+  alert(`Saved ${n} counts as today's on-hand. The Count & Order screen and recommendations are updated.`);
 }
 
 function clearSurvey(){

@@ -4,6 +4,20 @@ A colorant inventory tracker for paint departments.
 Data is stored locally in each device's browser. Back up from Setup regularly.
 
 
+v0.96
+-----
+- Survey "Autofill on hand": a button next to Export that saves the survey's
+  counted totals as today's count on the Count & Order screen — so a thorough
+  quarterly count also updates on-hand and the order recommendations without
+  recounting. Uses the combined total (aged jars included, since they stay in
+  usable inventory). Replaces any count already dated today rather than stacking.
+- Pour spouts now have an order and incoming display. You can log a spout order
+  and see what's coming, even though they're ordered through a separate system.
+  Their orders stay OUT of the PO order total (so the terminal cross-check still
+  matches) and out of the quarterly survey — they're tracked for visibility only.
+- Survey layout: sticks and keys now sit at the bottom, below the tint
+  colorants, matching the rest of the app.
+
 v0.95
 -----
 - Supplies: sticks (1G and 5G), keys, and pour spouts now live in the app,
