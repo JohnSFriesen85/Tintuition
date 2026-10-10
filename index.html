@@ -361,7 +361,7 @@ function tintWash(hex){
 }
 
 const VENDOR_ID = "84019";     // same for every store and every rep
-const APP_VERSION = "0.96";
+const APP_VERSION = "0.97";
 const KEY = "tintuition.v1";
 const DEFAULT_TARGET_WEEKS = 6;
 const DEFAULT_LEAD_DAYS = 6;     // order placed six days before delivery
@@ -394,12 +394,19 @@ function blankStore(number){
 }
 function freshState(){
   return {
-    colorants: COLORANT_SEED.map(n => ({
-      id:uid(), name:n,
-      defaultTargetWeeks:DEFAULT_TARGET_WEEKS,
-      boxSize: defaultBox(n),
-      hex: defaultHex(n)
-    })),
+    colorants: [
+      ...COLORANT_SEED.map(n => ({
+        id:uid(), name:n,
+        defaultTargetWeeks:DEFAULT_TARGET_WEEKS,
+        boxSize: defaultBox(n),
+        hex: defaultHex(n)
+      })),
+      // supplies — sticks, keys, pour spouts
+      ...SUPPLY_DEFS.map(d => ({
+        id:uid(), name:d.name, supply:d.kind, boxSize:1,
+        defaultTargetWeeks:DEFAULT_TARGET_WEEKS, hex:"#94A3B8"
+      }))
+    ],
     stores: [], currentId:null, tab:"dashboard"
   };
 }
@@ -526,9 +533,36 @@ function statsFor(colorantId, st, tw){
     intervals.push({ to:c.date, rate });
   }
 
-  // Work with whatever good weeks there are. One odd week shouldn't blank out the others —
-  // miscounts and misplaced tint are normal, and a rough number beats no number.
-  const rate = median(intervals.map(i => i.rate));
+  // Method 1 — per-interval median: robust to DELIVERY errors (a mislogged delivery only
+  // skews its own interval, and the median shrugs it off), but fooled by clustered COUNT
+  // miscounts (the set-aside rises leave the window full of their correction-drops).
+  const perIntervalRate = median(intervals.map(i => i.rate));
+
+  // Method 2 — total in/out over the window: used = (first on-hand) + (delivered) - (last
+  // on-hand). An accounting identity, so it's immune to count miscounts in the MIDDLE (they
+  // cancel at the endpoints) — but it trusts the two endpoints and every delivery completely,
+  // so a mislogged delivery or a bad endpoint count skews it.
+  // The two methods fail on DIFFERENT bad data. Each one OVER-reads when its weak spot is hit,
+  // so the true rate is at or below both — take the lower. That strips inflation from either a
+  // bad count or a bad delivery. Worst case is a slight undercount, which the 6-week buffer
+  // absorbs; the alternative (trusting an inflated reading) orders 2-3x too much.
+  let totalInOutRate = null;
+  if(win.length >= 2){
+    const first = win[0], last = win[win.length-1];
+    const days = daysBetween(first.date, last.date);
+    if(days > 0){
+      const got = st.orders
+        .filter(o => colorantId in o.values && availDate(o) > first.date && availDate(o) <= last.date)
+        .reduce((s,o)=> s + Number(o.values[colorantId]||0), 0);
+      const used = first.values[colorantId] + got - last.values[colorantId];
+      totalInOutRate = Math.max(0, (used/days)*7);   // net stock gain -> genuinely low usage
+    }
+  }
+
+  // Final rate: the lower of whichever methods produced a number.
+  let rate;
+  if(perIntervalRate !== null && totalInOutRate !== null) rate = Math.min(perIntervalRate, totalInOutRate);
+  else rate = (perIntervalRate !== null) ? perIntervalRate : totalInOutRate;
   const usable = rate !== null;
   const thin = usable && intervals.length === 1;   // only one clean week to go on
   const gaps = skipped > 0 || artifacts > 0;      // worth mentioning, not worth blocking on
@@ -1242,19 +1276,35 @@ function batchLabel(code){
 }
 function isFourBox(c){ return (c.boxSize || DEFAULT_BOX) === 4; }
 
-function openSurvey(){ window.__survey = window.__survey || { cut4:"", cut6:"", tot:{}, aged:{} }; S.tab = "survey"; save(); render(); window.scrollTo(0,0); }
+// Survey entries persist to storage (like the count draft) so a reload — e.g. iOS reclaiming
+// the page's memory mid-survey — can't lose them OR crash the app. ensureSurvey() always
+// returns a valid object, restoring from storage or starting fresh, so no screen that reads
+// it can ever hit `undefined`.
+function ensureSurvey(){
+  if(!window.__survey){
+    try{ const raw = localStorage.getItem(KEY+".survey"); window.__survey = raw ? JSON.parse(raw) : null; }catch(e){ window.__survey = null; }
+    if(!window.__survey || typeof window.__survey !== "object") window.__survey = { cut4:"", cut6:"", tot:{}, aged:{} };
+    window.__survey.tot = window.__survey.tot || {};
+    window.__survey.aged = window.__survey.aged || {};
+  }
+  return window.__survey;
+}
+function saveSurvey(){ try{ localStorage.setItem(KEY+".survey", JSON.stringify(window.__survey||{})); }catch(e){} }
+
+function openSurvey(){ ensureSurvey(); S.tab = "survey"; save(); render(); window.scrollTo(0,0); }
 function closeSurvey(){ S.tab = "entry"; render(); window.scrollTo(0,0); }
 
 function surveySet(kind, cid, val){
-  const sv = window.__survey; if(!sv) return;
+  const sv = ensureSurvey();
   if(kind === "cut4") sv.cut4 = val;
   else if(kind === "cut6") sv.cut6 = val;
   else if(kind === "tot") sv.tot[cid] = val;
   else if(kind === "aged") sv.aged[cid] = val;
+  saveSurvey();
   surveyRefresh();
 }
 function surveyRefresh(){
-  const sv = window.__survey; if(!sv) return;
+  const sv = ensureSurvey();
   let totJars = 0, agedJars = 0, bad = false;
   for(const c of S.colorants){
     const t = Number(sv.tot[c.id]||0), a = Number(sv.aged[c.id]||0);
@@ -1275,7 +1325,7 @@ function surveyRefresh(){
 }
 
 function viewSurvey(st){
-  const sv = window.__survey;
+  const sv = ensureSurvey();
   const surveyItems = S.colorants.filter(inSurvey)
     .sort((a,b) => (isSupply(a)?1:0) - (isSupply(b)?1:0));   // tint first, sticks/keys last
   let supplyHeaderShown = false;
@@ -1350,7 +1400,7 @@ function viewSurvey(st){
 // count also updates on-hand (and the order recommendations) without recounting. Uses the
 // combined total — aged jars included, since they stay in usable inventory.
 function autofillFromSurvey(){
-  const sv = window.__survey; if(!sv) return;
+  const sv = ensureSurvey();
   const st = store(); if(!st) return;
   const values = {};
   for(const c of S.colorants){
@@ -1372,11 +1422,12 @@ function autofillFromSurvey(){
 function clearSurvey(){
   if(!confirm("Clear all survey entries?")) return;
   window.__survey = { cut4:"", cut6:"", tot:{}, aged:{} };
+  saveSurvey();
   render();
 }
 
 function exportSurvey(){
-  const sv = window.__survey; if(!sv) return;
+  const sv = ensureSurvey();
   const st = store();
   const c4 = parseBatch(sv.cut4), c6 = parseBatch(sv.cut6);
   const L = [];
@@ -2040,21 +2091,30 @@ function render(){
   }
 
   if(S.tab === "count" || S.tab === "order") S.tab = "entry";   // old tabs merged
-  if(S.tab === "dashboard")      main.innerHTML = window.__detail ? viewDetail(st) : viewDashboard(st);
-  else if(S.tab === "entry")     main.innerHTML = viewEntry(st);
-  else if(S.tab === "survey")    main.innerHTML = viewSurvey(st);
-  else if(S.tab === "history")   main.innerHTML = viewHistory(st);
-  else                           main.innerHTML = viewSettings(st);
 
-  if(S.tab === "survey") surveyRefresh();
+  // Draw the current tab. If a view ever throws, fall back to the dashboard instead of
+  // leaving a blank screen with no nav — a crash in one view must never brick the whole app.
+  try{
+    if(S.tab === "dashboard")      main.innerHTML = window.__detail ? viewDetail(st) : viewDashboard(st);
+    else if(S.tab === "entry")     main.innerHTML = viewEntry(st);
+    else if(S.tab === "survey")    main.innerHTML = viewSurvey(st);
+    else if(S.tab === "history")   main.innerHTML = viewHistory(st);
+    else                           main.innerHTML = viewSettings(st);
 
-  // if a draft restored counts onto the entry screen, refresh each row's live math
-  if(S.tab === "entry"){
-    const dr = currentDraft(st);
-    if(dr && (dr.cbox || dr.cjar)){
-      const ids = new Set([...Object.keys(dr.cbox||{}), ...Object.keys(dr.cjar||{})]);
-      for(const cid of ids) countChanged(cid);
+    if(S.tab === "survey") surveyRefresh();
+
+    // if a draft restored counts onto the entry screen, refresh each row's live math
+    if(S.tab === "entry"){
+      const dr = currentDraft(st);
+      if(dr && (dr.cbox || dr.cjar)){
+        const ids = new Set([...Object.keys(dr.cbox||{}), ...Object.keys(dr.cjar||{})]);
+        for(const cid of ids) countChanged(cid);
+      }
     }
+  }catch(e){
+    window.__detail = null;
+    S.tab = "dashboard"; save();
+    try{ main.innerHTML = viewDashboard(st); }catch(e2){ main.innerHTML = `<div class="empty">Something went wrong drawing this screen. Your data is safe — tap a tab below.</div>`; }
   }
 
   nav.innerHTML = TABS.map(t =>

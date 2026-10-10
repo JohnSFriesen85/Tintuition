@@ -4,6 +4,29 @@ A colorant inventory tracker for paint departments.
 Data is stored locally in each device's browser. Back up from Setup regularly.
 
 
+v0.97
+-----
+- Fixed a crash that could blank the whole screen (no cards, no bottom nav) when
+  the app reloaded while Survey mode was open — e.g. iOS reclaiming the page's
+  memory mid-survey. The survey tab was remembered but its contents weren't, and
+  drawing that empty state threw. Survey entries now persist like the count draft,
+  so a reload restores them instead of losing them, and a safety net ensures no
+  single screen can ever blank the app again (it falls back to the dashboard).
+  Your data was never at risk — this was a display crash, not data loss.
+- Usage rate overhaul: the app now computes usage two independent ways and uses
+  the LOWER of the two. One method is the median of weekly intervals (robust to a
+  mislogged delivery); the other is the total in/out over the window — what you
+  started with, plus everything delivered, minus what you ended with (robust to
+  count miscounts in between). The two methods are fooled by different kinds of
+  bad data, and each one over-reads when its weak spot is hit, so the lower number
+  is always the closer-to-true one. This strips out the inflation that was driving
+  recommendations 2-3x too high on some colorants. Worst case is a slight
+  undercount, which the 6-week buffer absorbs.
+  * Checked against real store data: 4008 FL dropped from 15.8/wk to 5.1,
+    4009 CL from 18 to 10.8, and targets came back to sane levels (4009 BL target
+    102 instead of 160+). Stores and colorants that were already reading right
+    (like 4006 BL at ~22-27) barely moved.
+
 v0.96
 -----
 - Survey "Autofill on hand": a button next to Export that saves the survey's
